@@ -1,0 +1,143 @@
+From 0d77eb4fb933b2251d409778b2850b509396c142 Mon Sep 17 00:00:00 2001
+From: Andrei Gherzan <andrei@resin.io>
+Date: Wed, 18 Apr 2018 16:04:58 +0100
+Subject: [PATCH] Add support for running dnsu2t on systems without
+ MSG_FASTOPEN
+
+Signed-off-by: Andrei Gherzan <andrei@resin.io>
+Upstream-Status: Pending
+---
+ dnsu2t.c | 13 +++++++++++--
+ dnsu2t.h |  1 +
+ utils.c  | 16 +++++++++-------
+ utils.h  |  2 +-
+ 4 files changed, 22 insertions(+), 10 deletions(-)
+
+diff --git a/dnsu2t.c b/dnsu2t.c
+index bae4a45..c4bd066 100644
+--- a/dnsu2t.c
++++ b/dnsu2t.c
+@@ -117,7 +117,7 @@ static void dnsu2t_pkt_from_client(int srvfd, short what, void *_arg)
+
+ 	int sent;
+ 	if (!event_initialized(&self->relay_rd)) {
+-		fd = red_socket_client(SOCK_STREAM);
++		fd = red_socket_client(SOCK_STREAM, (self->config.tcp_fastopen == 1) ? 1: 0);
+ 		if (fd < 0)
+ 			goto fail;
+
+@@ -137,7 +137,13 @@ static void dnsu2t_pkt_from_client(int srvfd, short what, void *_arg)
+ 		}
+
+ 		// MSG_FASTOPEN is available since Linux 3.6 released on 30 Sep 2012
+-		sent = sendto(event_get_fd(&self->relay_rd), &in, pktlen, MSG_FASTOPEN,
++		if (self->config.tcp_fastopen != 1)
++			if (connect(event_get_fd(&self->relay_rd), (struct sockaddr*)&self->config.relayaddr, sizeof(self->config.relayaddr)) < 0) {
++				dnsu2t_log_error(LOG_ERR, "connect");
++				goto fail;
++			}
++		sent = sendto(event_get_fd(&self->relay_rd), &in, pktlen,
++			(self->config.tcp_fastopen == 1) ? MSG_FASTOPEN: 0,
+ 			(struct sockaddr*)&self->config.relayaddr, sizeof(self->config.relayaddr));
+ 		// Also, socket is not writable, right after MSG_FASTOPEN, so listener
+ 		// should be temporary disabled.
+@@ -321,6 +327,7 @@ static parser_entry dnsu2t_entries[] =
+ 	{ .key = "remote_port",     .type = pt_uint16 },
+ 	{ .key = "remote_timeout",  .type = pt_uint16 },
+ 	{ .key = "inflight_max",    .type = pt_uint16 },
++	{ .key = "tcp_fastopen",    .type = pt_uint16 },
+ 	{ }
+ };
+
+@@ -342,6 +349,7 @@ static int dnsu2t_onenter(parser_section *section)
+ 	instance->config.relayaddr.sin_port = htons(53);
+ 	instance->config.relay_timeout = 30;
+ 	instance->config.inflight_max = 16;
++	instance->config.tcp_fastopen = 1;
+
+ 	for (parser_entry *entry = &section->entries[0]; entry->key; entry++)
+ 		entry->addr =
+@@ -351,6 +359,7 @@ static int dnsu2t_onenter(parser_section *section)
+ 			(strcmp(entry->key, "remote_port") == 0)? (void*)&instance->config.relayaddr.sin_port :
+ 			(strcmp(entry->key, "remote_timeout") == 0)? (void*)&instance->config.relay_timeout:
+ 			(strcmp(entry->key, "inflight_max") == 0)? (void*)&instance->config.inflight_max :
++			(strcmp(entry->key, "tcp_fastopen") == 0)? (void*)&instance->config.tcp_fastopen :
+ 			NULL;
+ 	section->data = instance;
+ 	return 0;
+diff --git a/dnsu2t.h b/dnsu2t.h
+index 9da3b07..0be0b96 100644
+--- a/dnsu2t.h
++++ b/dnsu2t.h
+@@ -8,6 +8,7 @@ typedef struct dnsu2t_config_t {
+ 	struct sockaddr_in relayaddr;
+ 	uint16_t           relay_timeout;
+ 	uint16_t           inflight_max;
++	uint16_t           tcp_fastopen;
+ } dnsu2t_config;
+
+ typedef struct dns_header_t {
+diff --git a/utils.c b/utils.c
+index 9aa3518..9b0503a 100644
+--- a/utils.c
++++ b/utils.c
+@@ -124,7 +124,7 @@ char *redsocks_evbuffer_readline(struct evbuffer *buf)
+ #endif
+ }
+
+-int red_socket_client(int type)
++int red_socket_client(int type, int nb)
+ {
+ 	int fd = -1;
+ 	int error;
+@@ -135,10 +135,12 @@ int red_socket_client(int type)
+ 		goto fail;
+ 	}
+
+-	error = fcntl_nonblock(fd);
+-	if (error) {
+-		log_errno(LOG_ERR, "fcntl");
+-		goto fail;
++	if (nb == 1) {
++		error = fcntl_nonblock(fd);
++		if (error) {
++			log_errno(LOG_ERR, "fcntl");
++			goto fail;
++		}
+ 	}
+
+ 	if (type == SOCK_STREAM) {
+@@ -158,7 +160,7 @@ int red_socket_server(int type, struct sockaddr_in *bindaddr)
+ {
+ 	int on = 1;
+ 	int error;
+-	int fd = red_socket_client(type);
++	int fd = red_socket_client(type, 1);
+ 	if (fd == -1)
+ 		goto fail;
+
+@@ -189,7 +191,7 @@ struct bufferevent* red_connect_relay(struct sockaddr_in *addr, evbuffercb write
+ 	int relay_fd = -1;
+ 	int error;
+
+-	relay_fd = red_socket_client(SOCK_STREAM);
++	relay_fd = red_socket_client(SOCK_STREAM, 1);
+
+ 	error = connect(relay_fd, (struct sockaddr*)addr, sizeof(*addr));
+ 	if (error && errno != EINPROGRESS) {
+diff --git a/utils.h b/utils.h
+index 629ecaf..6d8dfd5 100644
+--- a/utils.h
++++ b/utils.h
+@@ -53,7 +53,7 @@ int redsocks_gettimeofday(struct timeval *tv);
+ char *redsocks_evbuffer_readline(struct evbuffer *buf);
+ struct bufferevent* red_connect_relay(struct sockaddr_in *addr, evbuffercb writecb, everrorcb errorcb, void *cbarg);
+ int red_socket_geterrno(struct bufferevent *buffev);
+-int red_socket_client(int type);
++int red_socket_client(int type, int nb);
+ int red_socket_server(int type, struct sockaddr_in *bindaddr);
+ int red_is_socket_connected_ok(struct bufferevent *buffev);
+ int red_recv_udp_pkt(int fd, char *buf, size_t buflen, struct sockaddr_in *fromaddr, struct sockaddr_in *toaddr);
+--
+2.7.4
+

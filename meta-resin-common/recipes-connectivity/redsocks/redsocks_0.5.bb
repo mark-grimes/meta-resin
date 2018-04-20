@@ -10,6 +10,7 @@ SRC_URI = " \
 	file://0001-using-libevent-2_1_x.patch \
 	file://0002-Add-dnsu2t-module-to-convert-DNS-UDP-to-DNS-TCP.patch \
 	file://0003-Add-support-for-running-dnsu2t-on-systems-without-MS.patch \
+	file://0004-Add-OS-dependent-default-configuration-values.patch \
 "
 
 DEPENDS = "libevent"

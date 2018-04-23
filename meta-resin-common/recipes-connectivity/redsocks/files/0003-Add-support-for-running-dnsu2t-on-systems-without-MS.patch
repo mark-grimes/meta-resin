@@ -53,7 +53,7 @@ index bae4a45..c4bd066 100644
  	instance->config.relayaddr.sin_port = htons(53);
  	instance->config.relay_timeout = 30;
  	instance->config.inflight_max = 16;
-+	instance->config.tcp_fastopen = 1;
++	instance->config.tcp_fastopen = 0;
 
  	for (parser_entry *entry = &section->entries[0]; entry->key; entry++)
  		entry->addr =

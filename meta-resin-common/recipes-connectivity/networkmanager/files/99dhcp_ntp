@@ -1,0 +1,35 @@
+#!/bin/bash
+
+added_servers_file=/tmp/chrony_added_dhcp_ntp_servers
+
+case "$2" in
+	dhcp4-change|up|connectivity-change)
+	if [[ -n $DHCP4_NTP_SERVERS ]]; then
+    # Tell chronyd to use this server
+		/usr/bin/chronyc add server $DHCP4_NTP_SERVERS
+    # Save the ntp server we received and interface information to a file
+    echo "resin_$1="""$DHCP4_NTP_SERVERS"" >> $added_servers_file
+	fi
+	;;
+	down)
+    # Read ntp server information from file into env variables
+    . $added_servers_file
+    eval ntp_connection=\$"resin_$1"
+    # Tell chronyd to remove this server
+		/usr/bin/chronyc delete $ntp_connection
+    # Delete the ntp server for that interface from file
+    sed -i "/resin_$1/d" $added_servers_file
+
+    # In the probable case that we have the same ntp server received via dhcp
+    # via multiple interfaces, we will have removed the ntp server from chronyd
+    # as chronyd doesn't think of interfaces. Just ntp server ips.
+    # Work around this by looping over added_servers_file and adding all servers
+    while read LINE; do
+      ntp_connection_ex="$(echo $LINE | cut -d'=' -f2)";
+      /usr/bin/chronyc add server $ntp_connection_ex
+    done < $added_servers_file
+
+	;;
+	*)
+	;;
+esac

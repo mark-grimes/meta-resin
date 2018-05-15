@@ -210,6 +210,8 @@ String. A space-separated list of preferred DNS servers to use for name resoluti
 ## Yocto version support
 
 The following Yocto versions are supported:
+ * Sumo (2.5)
+  * **TESTED**
  * Morty (2.2)
   * **TESTED**
  * Krogoth (2.1)

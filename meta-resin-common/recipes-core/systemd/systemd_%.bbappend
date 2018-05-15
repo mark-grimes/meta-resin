@@ -84,13 +84,11 @@ FILES_udev += "${rootlibexecdir}/udev/resin_update_state_probe"
 
 RDEPENDS_${PN}_append = " resin-ntp-config util-linux"
 
-# add pool.ntp.org as default ntp server
-PACKAGECONFIG[ntp] = "--with-ntp-servers='0.resinio.pool.ntp.org 1.resinio.pool.ntp.org 2.resinio.pool.ntp.org 3.resinio.pool.ntp.org',,,"
-
-PACKAGECONFIG_append = " ntp"
-
 # Network configuration is managed by NetworkManager
 PACKAGECONFIG_remove = "resolved networkd"
+
+# Time is managed by chrony. Remove systemd-timesyncd to reduce space
+PACKAGECONFIG_remove_pn-systemd = "timesyncd"
 
 # Add missing users/groups defined in /usr/lib/sysusers.d/*
 # In this time we avoid creating these at first boot
